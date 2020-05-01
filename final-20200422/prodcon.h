@@ -26,7 +26,7 @@
 #define REJECT		"ERROR: REJECTED"
 
 // Each item consists of random number of bytes between 1 and MAX_LETTERS.
-#define MAX_LETTERS     10000
+#define MAX_LETTERS     100000000
 
 // function prototypes
 int connectsock( char *host, char *service, char *protocol );

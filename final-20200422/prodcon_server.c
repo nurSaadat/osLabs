@@ -132,7 +132,7 @@ main( int argc, char *argv[] )
 			ssock = accept( msock, (struct sockaddr *)&fsin, &alen );
 			if (ssock < 0)
 			{
-				fprintf( stderr, "accept: %s\n", strerror(errno) );
+				fprintf( stderr, "[ERROR] Accept: %s\n", strerror(errno) );
 				exit(-1);
 			}
 
@@ -217,7 +217,7 @@ void *handleConnection( void *tid )
 	else if (type == 2) 
 		handleConsumer(ssock, thread_idx);
 	else 
-		fprintf( stderr, "[INFO] Unrecognized client type.\n");
+		fprintf( stderr, "[ERROR] Unrecognized client type.\n");
 
 	pthread_exit( NULL );
 }
@@ -315,7 +315,7 @@ void handleConsumer( int ssock, int thread_idx )
 	cons_num --;
 	client_num --;
 	pthread_mutex_unlock( &threads_mutex );
-	fprintf( stderr, "[INFO] Consumer peacefully gone.\n");
+	fprintf( stderr, "[INFO] [%d] Consumer peacefully gone.\n", thread_idx);
 }
 
 /*
@@ -354,7 +354,7 @@ void closeProducerConnection( int psock )
 	prod_num --;
 	client_num --;
 	pthread_mutex_unlock( &threads_mutex );
-	fprintf( stderr, "[INFO] Producer peacefully gone.\n");
+	fprintf( stderr, "[INFO] [ ] Producer peacefully gone.\n");
 }
 
 /*
@@ -368,10 +368,9 @@ void streamData( int psock, int csock, int size )
 
 	/* Send GO to producer */
 	int cc = write( psock, GO_STR, strlen(GO_STR) );
-	// fprintf( stderr, "[INFO] CC %i.\n", cc);
 	j = size;
 
-	fprintf( stderr, "[INFO] Read from producer\n");
+	fprintf( stderr, "[INFO] [ ] Read from producer\n");
 
 	while (j > 0)
 	{
@@ -381,13 +380,12 @@ void streamData( int psock, int csock, int size )
 			k = BUFSIZE;
 		char *str = malloc( k );
 		cc = read( psock, str, k );
-		// fprintf( stderr, "[INFO] %s.\n %li \n", str, strlen(str));
-		cc = write( csock, str, strlen(str) );
-		j = j - strlen(str);
+		cc = write( csock, str, cc );
+		j = j - cc;
 		free( str );
 	}	
 
-	fprintf( stderr, "[INFO] Wrote to consumer.\n");
+	fprintf( stderr, "[INFO] [ ] Wrote to consumer.\n");
 	
 	return;
 }

@@ -1,18 +1,19 @@
-#include <stdio.h>
-#include <string.h>
-#include <time.h> 
-#include <stdlib.h>
-#include <unistd.h>
+#include <arpa/inet.h>
 #include <errno.h>
-#include <sys/types.h>
-#include <sys/socket.h>
-#include <sys/time.h>
-#include <netinet/in.h>
 #include <fcntl.h>
+#include <math.h>
+#include <netinet/in.h>
 #include <prodcon.h>
 #include <pthread.h>
-#include <arpa/inet.h>
-#include <math.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/socket.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <time.h> 
+#include <unistd.h>
 
 #define CONS_STR		"CONSUME\r\n"
 #define MAX_CL_NUM 		2000
@@ -151,7 +152,14 @@ void *doConsumerThing( void *tid )
 	threadOnErrorExit(cc, csock, "[ERROR] [write CONSUME] Connection lost.\n");
 	// fprintf( stderr, "[INFO] [%ld] Wrote to server.\n",pthread_self() );
 	
-	/* create a document */
+	/* Create a directory */
+	struct stat st = {0};
+
+	if (stat("./files", &st) == -1) {
+		mkdir("./files", 0777);
+	}
+
+	/* Create a document */
 	sprintf(buf, "files/%ld.txt", pthread_self());
 	int dstf = open( buf, O_RDWR | O_CREAT, S_IRWXU | S_IRWXG );
 	if (dstf <= 0)
@@ -183,34 +191,30 @@ void *doConsumerThing( void *tid )
 			k = j;
 		else 
 			k = BUFSIZE;
-
-		// fprintf( stderr, "[INFO] K: %i, J: %i\n", k, j);
 		char *str = malloc( k );
 		cc = read( csock, str, k );
 		// fprintf( stderr, "[INFO] [%ld] Received char stream.\n %s\n", pthread_self(), str );
 		threadOnErrorExit(cc, csock, "[ERROR] [receiving string] Connection lost.\n");
 		write(devNull, str, strlen(str));
-		// fprintf( stderr, "[INFO] K: %i, J: %i, CC: %i\n", k, j, cc );
 		j = j - cc;
 		check = check + cc;
 		free(str);
 	}	
 
 	
-	fprintf( stderr, "[INFO] CHECK: %i NUM: %i.\n", check, number_of_characters );
+	fprintf( stderr, "[INFO] [%ld] CHECK: %i NUM: %i.\n", pthread_self(), check, number_of_characters );
 	char str[12];
 	sprintf(str, " %d", check);
 
 	/* Error checking. */
-	if (check >= number_of_characters)
+	if (check == number_of_characters)
 		write( dstf, SUCCESS, strlen(SUCCESS) ); 
 			
 
-	if (check < number_of_characters)
+	if (check != number_of_characters)
 		write( dstf, BYTE_ERROR, strlen(BYTE_ERROR) ); 
 
-	write( dstf, str, strlen(str)); 
-		
+	write( dstf, str, strlen(str)); 		
 
 	close(dstf);
 	close(devNull);
@@ -263,19 +267,3 @@ void shuffle ( int *array, size_t n )
         }
     }
 } 
-
-
-// void shuffle(int *array, size_t n)
-// {
-//     if (n > 1) 
-//     {
-//         size_t i;
-//         for (i = 0; i < n - 1; i++) 
-//         {
-//           size_t j = i + rand() / (RAND_MAX / (n - i) + 1);
-//           int t = array[j];
-//           array[j] = array[i];
-//           array[i] = t;
-//         }
-//     }
-// }

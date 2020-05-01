@@ -61,7 +61,7 @@ main( int argc, char *argv[] )
 
 	if (num_of_prod > MAX_CL_NUM)
 	{
-		fprintf( stderr, "[ERROR] a maximum of 2000 clients is allowed.\n" );
+		fprintf( stderr, "[ERROR] Maximum of 2000 clients is allowed.\n" );
 		exit(-1);
 	}
 
@@ -79,7 +79,7 @@ main( int argc, char *argv[] )
 
 	/* Calculate number of misbehaving producers */
 	misbehave = (num_of_prod * bad) / 100;
-	fprintf( stderr, "[INFO] [%i] misbehave number.\n",misbehave );
+	fprintf( stderr, "[INFO] [%i] misbehave number.\n", misbehave );
 
 	/* 
 	** Create an array of size num_prod
@@ -172,7 +172,6 @@ void *doProducerThing(void *tid)
 	j = number_of_characters;
 	for (i = 0; i < BUFSIZE; i++)
 		str[i] = (rand() % (LAST_PRINTABLE - FIRST_PRINTABLE + 1)) + FIRST_PRINTABLE;	
-	
 	// fprintf( stderr, "[INFO] %s\n", str);
 
 	/* Receive GO */
@@ -187,16 +186,12 @@ void *doProducerThing(void *tid)
 			k = j;
 		else 
 			k = BUFSIZE;
-		char subbuf[k];
-		memcpy( subbuf, str, k - 1 );
-		subbuf[k - 1] = '\0';
-		cc = write( csock, str, k );		
-		// fprintf( stderr, "[INFO] K = %i, J = %i, CC = %i \n", k, j, cc);
+		cc = write( csock, str, k );
 		threadOnErrorExit(cc, csock, "[ERROR] [send char stream] Connection lost.\n");
 		j = j - cc;
 	}	
 
-	fprintf( stderr, "[INFO] Sent chars\n");
+	fprintf( stderr, "[INFO] [%ld] Sent chars\n", pthread_self());
 
 	/* Receive DONE */
 	cc = read( csock, buf, BUFSIZE );
