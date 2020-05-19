@@ -1,22 +1,27 @@
-#include <stdio.h>
-#include <string.h>
-#include <stdlib.h>
-#include <unistd.h>
+#include <arpa/inet.h>
 #include <errno.h>
-#include <sys/types.h>
+#include <prodcon.h>
+#include <pthread.h>
+#include <netinet/in.h>
+#include <regex.h>
+#include <semaphore.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include <sys/socket.h>
 #include <sys/time.h>
-#include <netinet/in.h>
-#include <pthread.h>
-#include <semaphore.h>
-#include <prodcon.h>
-#include <arpa/inet.h>
+#include <sys/types.h>
+#include <time.h> 
+#include <unistd.h>
 
 #define GO_STR "GO\r\n"
 #define DONE_STR "DONE\r\n"
 
 int count_buffer;
 int cons_num, prod_num, client_num;
+int prod_served, cons_served;
+int total_excd_max, id_too_long;
+int excd_prod_max, excd_cons_max; 
 
 ITEM **buffer;
 pthread_mutex_t item_mutex, threads_mutex;
@@ -36,6 +41,8 @@ void handleConsumer( int ssock, int thread_idx );
 void closeClient( int ssock, int type );
 void closeProducerConnection( int psock );
 void streamData( int psock, int csock, int size );
+int handleStatus( int statsock, char *command );
+void identify( int statsock, char *command );
 
 /*
 **	This server can serve several clients at a time
@@ -43,37 +50,46 @@ void streamData( int psock, int csock, int size );
 int
 main( int argc, char *argv[] )
 {
-	char buf[BUFSIZE] = {'\0'};
-	char			*service;
+	char buf[ BUFSIZE ] = {'\0'};
+	char		*service;
 	struct 	sockaddr_in		fsin;
 			socklen_t		alen;
-	int				msock;
-	int				ssock;
-	fd_set			rfds;
-	fd_set			afds;
-	int				fd;
-	int				nfds;
-	int				cc;
-	int				rport = 0;	
-	int 			item_buf_size;
-	
+	int			msock;
+	int			ssock;
+	fd_set		rfds;
+	fd_set		afds;
+	int			fd;
+	int			nfds;
+	int			cc;
+	int			rport = 0;	
+	int 		item_buf_size;
+	time_t		curr_time;
+	time_t		start_time[ MAX_CLIENTS + 3 ];
+
+	/* Initialize counters */	
 	cons_num = 0;
 	prod_num = 0;
 	client_num = 0;
+	prod_served = 0;
+	cons_served = 0;
+	total_excd_max = 0;
+	id_too_long = 0;
+	excd_prod_max = 0;
+	excd_cons_max = 0;
 
-	switch (argc) 
+	switch ( argc ) 
 	{
 		case	2:
 			/* If no port provided - let the OS choose a port and tell the user. */
 			/* Initialize buffer */
 			rport = 1;
-			item_buf_size = atoi(argv[1]);
+			item_buf_size = atoi( argv[1] );
 			break;
 		case	3:
 			/* If user provides a port - use it */
 			/* Initialize buffer */
 			service = argv[1];
-			item_buf_size = atoi(argv[2]);
+			item_buf_size = atoi( argv[2] );
 			break;
 		default:
 			fprintf( stderr, "[WARNING] usage: server [port] bufsize\n" );
@@ -97,17 +113,17 @@ main( int argc, char *argv[] )
 	/* Then we put msock in the set */
 	FD_SET( msock, &afds );
 
-	/* mutex for item writing */
+	/* Mutex for item writing */
 	pthread_mutex_init( &item_mutex, NULL );
 
-	/* mutex for thread placement */
+	/* Mutex for thread placement */
 	pthread_mutex_init( &threads_mutex, NULL );
 
-	/* semaphores for keeping track of fullness of information buffer */
+	/* Semaphores for keeping track of fullness of information buffer */
 	sem_init( &full, 0, 0 );
 	sem_init( &empty, 0, item_buf_size );
 
-	/* int to keep track of buffer idx */
+	/* Int to keep track of buffer idx */
 	count_buffer = 0;
 
 	fprintf( stderr,  "[INFO] Loading server.\n");
@@ -115,13 +131,24 @@ main( int argc, char *argv[] )
 	for (;;)
 	{
 		memcpy((char *)&rfds, (char *)&afds, sizeof(rfds));
+		/* Timeout interval */
+		struct timeval tv;
+		tv.tv_sec = REJECT_TIME;
+		tv.tv_usec = 0;
 
-		if (select(nfds, &rfds, (fd_set *)0, (fd_set *)0,
-				(struct timeval *)0) < 0)
+		cc = select(nfds, &rfds, (fd_set *)0, (fd_set *)0, &tv);
+
+		if (cc == 0)
 		{
-			fprintf( stderr, "server select: %s\n", strerror(errno) );
+			fprintf(stderr, "Brr, I woke up\n");
+			continue;
+		}
+		else if (cc == -1)
+		{
+			fprintf( stderr, "[ERROR] Server select: %s\n", strerror(errno) );
 			exit(-1);
 		}
+
 
 		if (FD_ISSET( msock, &rfds)) 
 		{
@@ -130,6 +157,9 @@ main( int argc, char *argv[] )
 			/* we can call accept with no fear of blocking */
 			alen = sizeof(fsin);
 			ssock = accept( msock, (struct sockaddr *)&fsin, &alen );
+			/* Record start time */
+			time( &start_time[ssock] );
+
 			if (ssock < 0)
 			{
 				fprintf( stderr, "[ERROR] Accept: %s\n", strerror(errno) );
@@ -139,26 +169,58 @@ main( int argc, char *argv[] )
 			/* If a new client arrives, we must add it to our afds set */
 			FD_SET( ssock, &afds );
 
-			pthread_mutex_lock( &threads_mutex );
 			/* and increase the maximum, if necessary */
 			if ( ssock+1 > nfds )
 				nfds = ssock+1;
-			pthread_mutex_unlock( &threads_mutex );
 		}
 
 		/* Now check all the regular sockets */
 		for ( fd = 3; fd < nfds; fd++ )
 		{
-			if (fd != msock && FD_ISSET(fd, &rfds))
+
+			if ( fd != msock && FD_ISSET(fd, &afds) )
+			{
+				/* Check if it is not too late to service */
+				time( &curr_time );
+				if ( difftime( curr_time, start_time[fd]) >= REJECT_TIME ) 
+				{
+					id_too_long ++;
+					close(fd);		
+					fprintf( stderr, "[ERROR] Client rejected. Identification takes too long.\n" );			
+
+					/* Don't forget to stop monitoring this socket */
+					FD_CLR( fd, &afds );
+					FD_CLR( fd, &rfds );
+
+					/* Decrement the count if necessary */
+					if ( nfds == fd + 1 )
+						nfds --;
+					continue;
+				}
+			}
+
+			if ( fd != msock && FD_ISSET(fd, &rfds) )
 			{	
+				memset( buf, 0, sizeof(buf) );
+
 				if ( (cc = read( fd, buf, BUFSIZE )) <= 0 )
 				{
-					printf( "The client has gone.\n" );
+					printf( "[ERROR] The client has gone.\n" );
 					(void) close(fd);
 				}
 				else
 				{
-					/* initialize a thread */
+					if ( handleStatus( fd, buf ) != 1)
+					{
+						FD_CLR( fd, &afds );
+						/* lower the max socket number if needed */
+						if ( nfds == fd+1 )
+							nfds --;
+						continue;
+					}
+						
+
+					/* Initialize a thread */
 					pthread_t thread;
 					int status;
 					THREAD_INFO *t_inf;
@@ -177,6 +239,8 @@ main( int argc, char *argv[] )
 						client_num ++;
 						status = pthread_create( &thread, NULL, handleConnection,  (void *) t_inf );	
 					}
+					else
+						total_excd_max ++;				
 
 					pthread_mutex_unlock( &threads_mutex );
 
@@ -189,15 +253,9 @@ main( int argc, char *argv[] )
 
 				/* If the client has closed the connection, stop monitoring the socket */
 				FD_CLR( fd, &afds );
-				FD_CLR( fd, &rfds );
-				
-				pthread_mutex_lock( &threads_mutex );
 				/* lower the max socket number if needed */
 				if ( nfds == fd+1 )
-					nfds--;
-				pthread_mutex_unlock( &threads_mutex );
-
-				fprintf(stderr, "[ERROR] SERVV");
+					nfds --;
 
 			}
 
@@ -269,7 +327,8 @@ void handleProducer( int ssock, int thread_idx )
 	
 	/* Put the item in the next slot in the buffer */
 	buffer[count_buffer] = item;
-	count_buffer++;
+	count_buffer ++;
+	prod_served ++;
 	fprintf( stderr,  "[INFO] [+1] Count buffer value: %d.\n", count_buffer);
 
 	pthread_mutex_unlock( &item_mutex );
@@ -301,6 +360,7 @@ void handleConsumer( int ssock, int thread_idx )
 	ITEM *p = buffer[count_buffer-1];
 	buffer[count_buffer-1] = NULL;
 	count_buffer--;
+	cons_served ++;
 
 	fprintf( stderr,  "[INFO] [-1] Count buffer value: %d.\n", count_buffer);
 	pthread_mutex_unlock( &item_mutex );
@@ -334,9 +394,16 @@ void closeClient( int ssock, int type )
 	client_num --;
 	pthread_mutex_unlock( &threads_mutex );
 	if (type == 0)
+	{
 		fprintf( stderr, "[INFO] Producer killed. Too many producers.\n");
+		excd_prod_max ++;
+	}
 	else
+	{
 		fprintf( stderr, "[INFO] Consumer killed. Too many consumers.\n");
+		excd_cons_max ++;
+	}
+		
 	close( ssock );
 	pthread_exit( NULL );
 }
@@ -370,14 +437,11 @@ void closeProducerConnection( int psock )
 */
 void streamData( int psock, int csock, int size )
 {
-	/* Send characters in chunks */
-	int j, k;
-	
+	int j, k, cc;
 
 	/* Send GO to producer */
-	int cc = write( psock, GO_STR, strlen(GO_STR) );
+	cc = write( psock, GO_STR, strlen(GO_STR) );
 	j = size;
-
 	fprintf( stderr, "[INFO] [ ] Read from producer\n");
 
 	while (j > 0)
@@ -397,3 +461,81 @@ void streamData( int psock, int csock, int size )
 	
 	return;
 }
+
+int handleStatus( int statsock, char *command )
+{
+	/* Test if status */
+	regex_t regex;
+	int rval;
+	rval = regcomp(&regex, "STATUS/", 0);
+	rval = regexec(&regex, command, 0, NULL, 0);
+	if (rval == 0)
+	{
+		identify( statsock, command );
+		close( statsock );
+		return 0;
+	}		
+	else if (rval == REG_NOMATCH)
+		return 1;
+	else
+		fprintf(stderr, "[ERROR] Regex error.\n");
+}
+
+void identify( int statsock, char *command )
+{
+	int cc;
+	char str[12];
+
+	/* If status, identify */
+	if ( !strcmp( command, "STATUS/CURRCLI\r\n" ) || !strcmp( command, "STATUS/CURRCLI" ) || !strcmp( command, "CURRCLI" ) )
+    {
+        /* Write to client */
+		sprintf(str, "%d\r\n", client_num);
+    }
+    else if ( !strcmp( command, "STATUS/CURRPROD\r\n" ) || !strcmp( command, "STATUS/CURRPROD" ) || !strcmp( command, "CURRPROD" ) )
+    {
+	    sprintf(str, "%d\r\n", prod_num);
+    }
+    else if ( !strcmp( command, "STATUS/CURRCONS\r\n" ) || !strcmp( command, "STATUS/CURRCONS" ) || !strcmp( command, "CURRCONS" ) )
+    {
+        sprintf(str, "%d\r\n", cons_num);
+    }
+    else if ( !strcmp( command, "STATUS/TOTPROD\r\n" ) || !strcmp( command, "STATUS/TOTPROD" ) || !strcmp( command, "TOTPROD" ) )
+    {
+        sprintf(str, "%d\r\n", prod_served);
+    }
+    else if ( !strcmp( command, "STATUS/TOTCONS\r\n" ) || !strcmp( command, "STATUS/TOTCONS" ) || !strcmp( command, "TOTCONS" ) )
+    {
+        sprintf(str, "%d\r\n", cons_served);
+    }
+    else if ( !strcmp( command, "STATUS/REJMAX\r\n" ) || !strcmp( command, "STATUS/REJMAX" ) || !strcmp( command, "REJMAX" ) )
+    {
+        sprintf(str, "%d\r\n", total_excd_max);
+    }
+    else if ( !strcmp( command, "STATUS/REJSLOW\r\n" ) || !strcmp( command, "STATUS/REJSLOW" ) || !strcmp( command, "REJSLOW" ) )
+    {
+        sprintf(str, "%d\r\n", id_too_long );
+    }
+    else if ( !strcmp( command, "STATUS/REJPROD\r\n" ) || !strcmp( command, "STATUS/REJPROD" ) || !strcmp( command, "REJPROD" ) )
+    {
+        sprintf(str, "%d\r\n", excd_prod_max);
+    }
+    else if ( !strcmp( command, "STATUS/REJCONS\r\n" ) || !strcmp( command, "STATUS/REJCONS" ) || !strcmp( command, "REJCONS" ) )
+    {
+        sprintf(str, "%d\r\n", excd_cons_max);
+    }
+    else
+    {
+        cc = write( statsock, "[ERROR] Command is not supported.\n", strlen("[ERROR] Command is not supported.\n") );
+		return;
+    }
+
+	cc = write( statsock, str, strlen(str) );
+    // if (cc <= 0)	
+	// {
+	// 	fprintf( stderr, "[ERROR] Couldn't send message to status client." );
+	// 	close( statsock ); 
+	// }
+
+}
+
