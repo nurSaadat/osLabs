@@ -1,0 +1,23 @@
+Saadat Nursultan
+
+1. processor and memory specifications
+
+2.  			threads		sequential
+mm 10 20 2 4		0.000702	0.000058
+mm 50 70 2 4		0.003352	0.002974
+mm 100 200 2 4		0.006445	0.031777
+mm 300 500 2 4		0.048848	0.224413
+mm 500 700 2 4		0.207434	0.849624 
+mm 900 1000 2 4		1.174337	4.306752
+mm 1023 1023 2 4	1.598562	6.143139
+
+3. 
+ For small matrices thread implementation takes more time than simple sequential one. However, the bigger the matrix, the better are results using threads. Threads improve result for big matrices drastically (e.g. 1023 x 1023). 
+ For small matrices the initialization of threads takes more time than direct sequential calculation. However, as the size of matrix grows the time needed for initialization becomes negligible compared to time needed for computation. In that case parallel computation via threads becomes convenient.
+
+4. 
+ I had to create an array 'index[THREADS]' to store the value of 'i' as calling 'i++' is not atomic and may be preempted between the read and write, so some increments of the variable may be lost.
+ No mutexes or semaphore were used. Creation of a new array to store value of 'i' at particular instance was sufficient for my program to operate.
+
+
+
