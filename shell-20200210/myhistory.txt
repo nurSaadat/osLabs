@@ -1,0 +1,37 @@
+   1  nano hello.c
+   2  gcc hello.c
+   3  ./a.out
+   4  echo "Hello world"
+   5  printf "Hello world! \nNot too cool today"
+   6  ./a.out > output01.txt 
+   7  cat output01.txt  
+   8  date >> output01.txt 
+   9  cat output01.txt 
+   10  echo "Saadat Nursultan" >> output01.txt 
+   11  cat output01.txt | sort 
+   12  cat output01.txt | sort >> output02.txt
+   13  cat output01.txt | grep "lo"
+   14  wc output01.txt 
+   15  wc output02.txt 
+   16  mkdir mywork
+   17  mv output01.txt output02.txt mywork
+   18  ls
+   19  echo 1
+   20  echo 1; sleep 5; echo 2; sleep 5; echo 3
+   21  nano a.sh
+   22  bash a.sh &
+   23  echo "Hello world"
+   24  bash a.sh >> output03.txt &
+   25  echo "Hello world" >> output03.txt
+   26  cat output03.txt 
+   27  gedit &
+   28  ps
+   29  kill 3337
+   30  gedit &
+   31  xkill
+   32  gedit &
+   33  killall gedit
+   34  ping 127.0.0.1
+   35  ping -c 10 127.0.0.1 >> output04.txt
+   36  cat output04.txt 
+   37  history > myhistory.txt

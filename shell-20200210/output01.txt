@@ -1,0 +1,4 @@
+Hello, World!\n
+date
+Дс Қаң 20 18:23:24 +06 2020
+Saadat Nursultan
